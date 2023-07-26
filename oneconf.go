@@ -140,34 +140,31 @@ func LoadEnv(c any, prefix string, useName bool) {
 
 // LoadFlags set structure with values from the command line
 func LoadFlags(c any, useName bool) {
+
+	bools, vals, _ := ParseCommand(os.Args[1:])
+
 	cb := func(name, kind string, tags reflect.StructTag, chain []string) string {
 
 		if k := tags.Get("short"); k != "" {
-			for _, a := range os.Args[1:] {
-				if a == "--" {
-					break
-				}
-				if strings.HasPrefix(a, "-"+k+"=") {
-					return a[len(k)+2:]
-				}
-				if a == "-"+k && kind == "bool" {
-					return "true"
-				}
+
+			if bools[k] {
+				return "true"
+			}
+
+			if v := vals[k]; v != "" {
+				return v
 			}
 		}
 
 		if k := tags.Get("long"); k != "-" {
 			if k != "" {
-				for _, a := range os.Args[1:] {
-					if a == "--" {
-						break
-					}
-					if strings.HasPrefix(a, "--"+k+"=") {
-						return a[len(k)+3:]
-					}
-					if a == "--"+k && kind == "bool" {
-						return "true"
-					}
+
+				if bools[k] {
+					return "true"
+				}
+
+				if v := vals[k]; v != "" {
+					return v
 				}
 			}
 
@@ -179,10 +176,12 @@ func LoadFlags(c any, useName bool) {
 				n += name
 				n = strings.ToLower(n)
 
-				for _, a := range os.Args[1:] {
-					if strings.HasPrefix(a, "--"+n+"=") {
-						return a[len(n)+3:]
-					}
+				if bools[n] {
+					return "true"
+				}
+
+				if v := vals[n]; v != "" {
+					return v
 				}
 			}
 		}
@@ -202,6 +201,8 @@ func GenerateHelp(c any, prefix string, useName, showShort, showLong, showEnv bo
 		long  string
 		env   string
 		kind  string
+		def   string
+		name  string
 	}
 
 	ops := []op{}
@@ -212,6 +213,8 @@ func GenerateHelp(c any, prefix string, useName, showShort, showLong, showEnv bo
 
 		h.kind = kind
 		h.help = tags.Get("help")
+		h.def = tags.Get("default")
+		h.name = tags.Get("name")
 
 		if showShort {
 			h.short = tags.Get("short")
@@ -260,21 +263,25 @@ func GenerateHelp(c any, prefix string, useName, showShort, showLong, showEnv bo
 
 		if o.short != "" && o.kind == "bool" {
 			t = append(t, fmt.Sprintf("-%s", o.short))
-		}
-		if o.short != "" {
-			t = append(t, fmt.Sprintf("-%s=", o.short))
-		}
-		if o.long != "" && o.kind == "bool" {
-			t = append(t, fmt.Sprintf("--%s", o.long))
-		}
-		if o.long != "" {
-			t = append(t, fmt.Sprintf("--%s=", o.long))
-		}
-		if o.env != "" && o.env != "-" {
-			t = append(t, fmt.Sprintf("%s=", o.env))
+		} else if o.short != "" {
+			t = append(t, fmt.Sprintf("-%s <%s>", o.short, o.name))
 		}
 
-		help += fmt.Sprintf("   %s (%s)\n        %s\n", strings.Join(t, ", "), o.kind, o.help)
+		if o.long != "" && o.kind == "bool" {
+			t = append(t, fmt.Sprintf("--%s", o.long))
+		} else if o.long != "" {
+			t = append(t, fmt.Sprintf("--%s <%s>", o.long, o.name))
+		}
+
+		if o.env != "" && o.env != "-" {
+			t = append(t, fmt.Sprintf("%s=\"%s\"", o.env, o.name))
+		}
+
+		if o.def != "" {
+			help += fmt.Sprintf("   %s (%s==\"%s\")\n        %s\n", strings.Join(t, ", "), o.kind, o.def, o.help)
+		} else {
+			help += fmt.Sprintf("   %s (%s)\n        %s\n", strings.Join(t, ", "), o.kind, o.help)
+		}
 
 	}
 
@@ -283,37 +290,77 @@ func GenerateHelp(c any, prefix string, useName, showShort, showLong, showEnv bo
 
 // IsAskingForHelp return true in case command line includes -h or --help
 func IsAskingForHelp() bool {
-	return GetShortArg("h") != "" || GetLongArg("help") != ""
+	b, _, _ := ParseCommand(os.Args[1:])
+	return b["h"] || b["help"]
 }
 
-// GetShortArg will return the value of a short line argument -c=VAL, -c by itself is true or empty
-func GetShortArg(name string) string {
-	for _, a := range os.Args[1:] {
-		if a == "--" {
-			break
-		}
-		if strings.HasPrefix(a, "-"+name+"=") {
-			return a[len(name)+2:]
-		}
-		if a == "-"+name {
+// GetArg will return the value of a short line argument -c=VAL, -c by itself is true or empty
+func GetArg(name string) string {
+	b, m, _ := ParseCommand(os.Args[1:])
+	for k := range b {
+		if k == name {
 			return "true"
+		}
+	}
+	for k, v := range m {
+		if k == name {
+			return v
 		}
 	}
 	return ""
 }
 
-// GetLongArg will return the value of a long line argument --name=VAL, or empty
-func GetLongArg(name string) string {
-	for _, a := range os.Args[1:] {
-		if a == "--" {
+// ParseCommand will parse an []string to brake it into a list of booleans, a list of arguments and
+// a map of key:value
+func ParseCommand(in []string) (bools map[string]bool, vals map[string]string, args []string) {
+
+	i := 0
+
+	bools = make(map[string]bool)
+	vals = make(map[string]string)
+
+	for {
+		if i >= len(in) {
 			break
 		}
-		if strings.HasPrefix(a, "--"+name+"=") {
-			return a[len(name)+3:]
+
+		if in[i] == "--" {
+			i++
+			for i < len(in) {
+				args = append(args, in[i])
+				i++
+			}
+			break
 		}
-		if a == "--"+name {
-			return "true"
+
+		if strings.HasPrefix(in[i], "--") {
+			if (i+1) >= len(in) || strings.HasPrefix(in[i+1], "-") {
+				bools[in[i][2:]] = true
+			} else {
+				vals[in[i][2:]] = in[i+1]
+				i++
+			}
+		} else if strings.HasPrefix(in[i], "-") {
+			for j, f := range in[i][1:] {
+				if j == (len(in[i]) - 2) {
+					if (i+1) >= len(in) || strings.HasPrefix(in[i+1], "-") {
+						bools[string(f)] = true
+					} else {
+						vals[string(f)] = in[i+1]
+						i++
+					}
+					break
+				}
+				bools[string(f)] = true
+			}
+		} else {
+			args = append(args, in[i])
 		}
+
+		i++
 	}
-	return ""
+
+	// fmt.Println(bools, vals, args)
+
+	return bools, vals, args
 }
