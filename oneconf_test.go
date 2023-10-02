@@ -144,8 +144,9 @@ func ExampleLoadFlags() {
 	}
 
 	c := cfg{}
+	fmt.Println(c)
 
-	os.Args = []string{"binary", "-h"}
+	os.Args = []string{"binary", "-h", "-a"}
 
 	LoadFlags(&c, false) // populate named ones only
 	fmt.Println(c)
@@ -153,5 +154,5 @@ func ExampleLoadFlags() {
 	LoadFlags(&c, true) // populate named ones and then by field name
 	fmt.Println(c)
 
-	// Outputs:
+	// Output: {d}
 }

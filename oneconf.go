@@ -232,8 +232,8 @@ func GenerateHelp(c any, prefix string, useName, showShort, showLong, showEnv bo
 			h.long = strings.ToLower(n + name)
 		}
 
-		if e := tags.Get("env"); e != "-" {
-			if showEnv && e != "" {
+		if e := tags.Get("env"); showEnv && e != "-" {
+			if e != "" {
 				h.env = strings.ToUpper(prefix + e)
 			}
 
