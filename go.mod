@@ -1,4 +1,4 @@
-module oneconf
+module github.com/xgvargas/oneconf
 
 go 1.20
 
